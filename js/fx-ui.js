@@ -151,6 +151,6 @@
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
 
-  function start() { if (!watchMain()) { setTimeout(start, 30); return; } registerSW(); }
+  function start() { if (!watchMain()) { setTimeout(start, 30); return; } registerSW(); setTimeout(() => { try { sessionStorage.removeItem('m7retry'); } catch (e) {} }, 4000); }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(start, 0)); else setTimeout(start, 0);
 })();

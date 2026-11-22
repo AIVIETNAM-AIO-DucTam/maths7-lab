@@ -1,6 +1,6 @@
 /* Maths 7 Lab — service worker: works offline after the first visit and opens instantly afterwards.
    Page (navigation): network first, cached copy when offline. Scripts/styles/audio/fonts: cache, refreshed in the background. */
-const VER = 'm7-v11';
+const VER = 'm7-v12';
 const CORE = ['./', 'index.html', 'favicon.svg', 'og.png', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', (e) => {
@@ -11,7 +11,7 @@ self.addEventListener('install', (e) => {
     try {
       const html = await (await fetch('index.html', { cache: 'no-cache' })).text();
       const urls = [...html.matchAll(/(?:src|href)="((?:js|css)\/[^"]+)"/g)].map((m) => m[1]);
-      await c.addAll(urls);
+      await Promise.all(urls.map((u) => c.add(u).catch(() => {}))); // one failed file must not skip the rest
     } catch (err) {}
     self.skipWaiting();
   })());
