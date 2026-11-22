@@ -59,8 +59,10 @@
     const cv = h('canvas', { class: opts.cls || '' }); parent.append(cv);
     let w = 0, hh = 0, raf = 0, running = true, t0 = performance.now();
     const fit = () => { const r = cv.getBoundingClientRect(); const dpr = Math.min(2, devicePixelRatio || 1); w = r.width; hh = r.height; cv.width = Math.max(1, w * dpr); cv.height = Math.max(1, hh * dpr); cv.getContext('2d').setTransform(dpr, 0, 0, dpr, 0, 0); };
-    const loop = (t) => { if (!running) return; if (!document.body.contains(cv)) { running = false; return; } draw(cv.getContext('2d'), w, hh, (t - t0) / 1000); raf = requestAnimationFrame(loop); };
+    let vis = true; // pause drawing while the canvas is scrolled off screen (saves battery on phones)
+    const loop = (t) => { raf = 0; if (!running) return; if (!document.body.contains(cv)) { running = false; return; } if (!vis) return; draw(cv.getContext('2d'), w, hh, (t - t0) / 1000); raf = requestAnimationFrame(loop); };
     requestAnimationFrame(() => { fit(); raf = requestAnimationFrame(loop); });
+    if ('IntersectionObserver' in window) new IntersectionObserver((es) => { vis = es[es.length - 1].isIntersecting; if (vis && running && !raf) raf = requestAnimationFrame(loop); }).observe(cv);
     if ('ResizeObserver' in window) new ResizeObserver(fit).observe(cv);
     const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (reduce) { setTimeout(() => { running = false; fit(); draw(cv.getContext('2d'), w, hh, 2); }, 50); }

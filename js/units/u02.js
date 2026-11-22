@@ -290,7 +290,7 @@
           expr('Expand and simplify 12 + 3(2x − 3)', '6x+3', '12 + 6x − 9 = 6x + 3.', { simplified: true, show: '6x + 3', d: 2 }),
           gen(() => { const a = R(2, 9), b = R(1, 6), c = RNZ(-12, 12), v = pick(vars); return expr(`Expand ${a}(${lin(b, v, c)})`, `${a * b}${v}${a * c > 0 ? '+' : ''}${a * c}`, `${a} × ${b === 1 ? '' : b}${v} = ${a * b}${v}; ${a} × ${NB(c)} = ${N(a * c)}.`, { simplified: true, show: `${a * b}${v} ${a * c > 0 ? '+' : '−'} ${Math.abs(a * c)}` }); }),
           gen(() => { const a = R(2, 6), b = R(1, 5), c = R(1, 9), d = R(1, 9), v = pick(vars); return expr(`Expand and simplify ${a}(${lin(b, v, c)}) + ${d}${v}`, `${a * b + d}${v}+${a * c}`, `${a * b}${v} + ${a * c} + ${d}${v} = ${a * b + d}${v} + ${a * c}.`, { simplified: true, show: `${a * b + d}${v} + ${a * c}`, d: 2 }); }),
-          gen(() => { const a = R(2, 9), p = R(2, 9), q = R(1, 9); return mcq(`Which is the correct expansion of ${a}(${p}x − ${q})?`, [`${a * p}x − ${a * q}`, `${a * p}x − ${q}`, `${a + p}x − ${a * q}`, `${a * p}x + ${a * q}`], 0, `Multiply both terms by ${a}.`); }),
+          gen(() => { const a = R(2, 9), q = R(1, 9); let p = R(2, 9); if (a + p === a * p) p = 3; return mcq(`Which is the correct expansion of ${a}(${p}x − ${q})?`, [`${a * p}x − ${a * q}`, `${a * p}x − ${q}`, `${a + p}x − ${a * q}`, `${a * p}x + ${a * q}`], 0, `Multiply both terms by ${a}.`); }),
           gen(() => { const n = R(3, 9), p = R(2, 15); return expr(`Tickets cost $(x + ${p}) each. Write and expand an expression for the cost of ${n} tickets.`, `${n}x+${n * p}`, `${n}(x + ${p}) = ${n}x + ${n * p}.`, { simplified: true, app: true }); }, { app: true }),
         ],
       },

@@ -244,53 +244,80 @@
 
   /* ---------------- speech (Claude voice when offered, browser voice otherwise) ---------------- */
   const Speech = {
-    tts: undefined, blocked: false, state: 'idle', listeners: [],
+    tts: undefined, blocked: false, state: 'idle', listeners: [], token: 0, _keep: [],
     async init() {
       if (this.tts !== undefined) return this.tts;
       this.tts = null;
       try { if (window.claude && window.claude.use) { const t = await window.claude.use('tts'); if (t) { this.tts = t; t.onState(({ state }) => this._set(state)); } } } catch (e) { this.tts = null; }
       return this.tts;
     },
-    _set(st) { this.state = st; this.listeners.forEach((f) => f(st)); },
+    _set(st) { this.state = st; this.listeners.forEach((f) => f(st)); if (APP.Music) APP.Music.duck(st === 'speaking' || st === 'starting'); },
     onState(f) { this.listeners.push(f); },
     available() { return !this.blocked && (!!this.tts || 'speechSynthesis' in window); },
-    voiceEN() {
-      if (!('speechSynthesis' in window)) return null;
-      const vs = speechSynthesis.getVoices();
-      return vs.find((v) => /en-GB/i.test(v.lang) && /female|libby|sonia|serena|kate|google uk/i.test(v.name)) || vs.find((v) => /en-GB/i.test(v.lang)) || vs.find((v) => /^en/i.test(v.lang)) || null;
+    // ---- browser voices: pick natural-sounding English voices, separated by gender ----
+    voices() {
+      if (!('speechSynthesis' in window)) return { f: [], m: [], any: [] };
+      const vs = speechSynthesis.getVoices().filter((v) => /^en[-_]/i.test(v.lang) || /^en$/i.test(v.lang));
+      const F = /female|woman|girl|zira|aria|jenny|sonia|libby|maisie|hazel|susan|kate|serena|samantha|karen|moira|tessa|fiona|victoria|allison|ava\b|joanna|salli|kimberly|emma|amy|olivia|natasha|clara|michelle|nancy|jane|sara\b|martha|stephanie|catherine|shelley|sandy|flo\b|grandma|ana\b|emily|heera|veena|ivy|kendra|nicky|tiffany|zoe|isabella|alice|lily|heart|bella|nicole|sky\b|nova|jessica|kore|aoede|river/i;
+      const M = /\bmale|\bman\b|david|guy\b|ryan|george|thomas|daniel|alex\b|fred\b|oliver|arthur|james|mark\b|richard|christopher|eric\b|brian|matthew|justin|aaron|gordon|rishi|lee\b|tony|roger|ralph|reed|rocko|eddy|grandpa|william|liam|andrew|brandon|davis|jason|steffan|tom\b|joey|kevin|russell|ravi|prabhat|lewis|fable|michael|puck|fenrir|onyx|echo|adam/i;
+      const q = (v) => (/natural|neural|online|enhanced|premium|siri/i.test(v.name) ? 6 : 0) + (/google/i.test(v.name) ? 2 : 0) + (/en[-_]gb/i.test(v.lang) ? 1 : 0) + (v.localService === false ? 1 : 0);
+      const by = (arr) => arr.slice().sort((a, b) => q(b) - q(a));
+      const f = by(vs.filter((v) => F.test(v.name))), m = by(vs.filter((v) => M.test(v.name) && !F.test(v.name)));
+      return { f, m, any: by(vs) };
     },
+    // assign each speaker a distinct voice (and pitch, if the device has too few voices)
+    cast(speakers) {
+      const V = this.voices(), used = { f: 0, m: 0 }, out = {};
+      speakers.forEach(([name, g]) => {
+        const k = g === 'm' ? 'm' : 'f', list = V[k].length ? V[k] : V.any, i = used[k]++;
+        const voice = list.length ? list[i % list.length] : null, reuse = Math.floor(i / Math.max(1, list.length));
+        // if no gendered voice exists, shape the pitch so male and female still sound different
+        const base = V[k].length ? 1 : k === 'm' ? 0.78 : 1.22;
+        out[name] = { voice, pitch: Math.max(0.5, Math.min(1.6, base + (reuse ? (k === 'm' ? -0.12 : 0.12) * reuse : 0))), rate: 1 - 0.04 * reuse };
+      });
+      return out;
+    },
+    voiceEN() { const V = this.voices(); return V.f[0] || V.any[0] || null; },
+    // lines: [{text, voice (claude voice name), id, g ('m'|'f'), who}] ; resolves true when finished, false when interrupted
     async speak(text, opt = {}) {
-      if (this.blocked) return;
-      const lines = Array.isArray(text) ? text : [{ text }];
+      if (this.blocked) return false;
+      const my = ++this.token;
+      const lines = Array.isArray(text) ? text : [{ text, g: opt.g }];
       if (this.tts) {
         try {
           const arg = lines.map((l) => ({ text: String(l.text).slice(0, 1990), voice: l.voice, language: 'en', id: l.id }));
           await this.tts.speak(arg.length === 1 && !arg[0].voice ? arg[0].text : arg, { rate: opt.rate || 1, language: 'en' });
-          return;
+          return my === this.token;
         } catch (e) {
-          if (e && e.code === 'not_granted') { this.blocked = true; APP.toast && APP.toast('Đọc to đã bị tắt cho trang này.'); return; }
-          if (e && (e.code === 'stopped' || e.code === 'no_gesture')) return;
-          if (e && e.code === 'busy') return;
-          // other failure: fall through to browser voice
+          if (e && e.code === 'not_granted') { this.blocked = true; APP.toast && APP.toast('Đọc to đã bị tắt cho trang này.'); return false; }
+          if (e && (e.code === 'stopped' || e.code === 'no_gesture' || e.code === 'busy')) return false;
+          // other failure: fall through to the browser voice
         }
       }
-      if (!('speechSynthesis' in window)) return;
-      speechSynthesis.cancel();
-      const v = this.voiceEN();
+      if (!('speechSynthesis' in window)) return false;
+      const synth = speechSynthesis;
+      if (synth.speaking || synth.pending) { synth.cancel(); await new Promise((r) => setTimeout(r, 120)); if (my !== this.token) return false; }
+      const cast = opt.cast || this.cast([...new Set(lines.map((l) => l.who || '_'))].map((w) => [w, (lines.find((l) => (l.who || '_') === w) || {}).g || opt.g || 'f']));
       return new Promise((res) => {
-        let i = 0;
+        let i = 0; this._keep = [];
+        const finish = (ok) => { if (my === this.token) this._set('idle'); res(ok); };
         const next = () => {
-          if (i >= lines.length) { this._set('idle'); return res(); }
-          const l = lines[i++]; const u = new SpeechSynthesisUtterance(String(l.text));
-          u.lang = (v && v.lang) || 'en-GB'; if (v) u.voice = v; u.rate = (opt.rate || 1) * 0.95; u.pitch = l.voice === 'airy' ? 1.25 : l.voice === 'rounded' ? 0.85 : 1;
-          u.onstart = () => { this._set('speaking'); opt.onLine && opt.onLine(i - 1, l.id); };
-          u.onend = next; u.onerror = () => { this._set('idle'); res(); };
-          speechSynthesis.speak(u);
+          if (my !== this.token) return res(false);
+          if (i >= lines.length) return finish(true);
+          const l = lines[i++], c = cast[l.who || '_'] || {}, u = new SpeechSynthesisUtterance(String(l.text));
+          this._keep.push(u); // keep a reference: Chrome drops events of garbage-collected utterances
+          if (c.voice) { u.voice = c.voice; u.lang = c.voice.lang; } else u.lang = 'en-GB';
+          u.pitch = c.pitch || 1; u.rate = Math.max(0.5, Math.min(2, (opt.rate || 1) * (c.rate || 1) * 0.96));
+          u.onstart = () => { if (my !== this.token) return; this._set('speaking'); opt.onLine && opt.onLine(i - 1, l.id); };
+          u.onend = () => setTimeout(next, i < lines.length ? 260 : 0);
+          u.onerror = (e) => { if (e && (e.error === 'interrupted' || e.error === 'canceled')) return res(false); setTimeout(next, 60); };
+          synth.speak(u);
+          if (synth.paused) synth.resume();
         };
         this._set('starting'); next();
       });
     },
-    async stop() { try { if (this.tts) await this.tts.stop(); } catch (e) {} if ('speechSynthesis' in window) speechSynthesis.cancel(); this._set('idle'); },
+    async stop() { this.token++; try { if (this.tts) await this.tts.stop(); } catch (e) {} if ('speechSynthesis' in window) speechSynthesis.cancel(); this._set('idle'); },
     async pause() { try { if (this.tts) return await this.tts.pause(); } catch (e) {} if ('speechSynthesis' in window) speechSynthesis.pause(); this._set('paused'); },
     async resume() { try { if (this.tts) return await this.tts.resume(); } catch (e) {} if ('speechSynthesis' in window) speechSynthesis.resume(); this._set('speaking'); },
   };
@@ -404,6 +431,7 @@
     shuffle: '<path d="M4 7h3c5 0 5 10 10 10h3M4 17h3c2 0 3-1.5 4-3.5M17 7h3M14 9.5C15 8 15.5 7 17 7"/><path d="m18 4 3 3-3 3M18 14l3 3-3 3"/>',
     trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>',
     speaker: '<path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16 9a4 4 0 0 1 0 6"/>',
+    music: '<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>',
     eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
     target: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1" fill="currentColor"/>',
     atom: '<circle cx="12" cy="12" r="1.6" fill="currentColor"/><ellipse cx="12" cy="12" rx="9" ry="3.6"/><ellipse cx="12" cy="12" rx="9" ry="3.6" transform="rotate(60 12 12)"/><ellipse cx="12" cy="12" rx="9" ry="3.6" transform="rotate(120 12 12)"/>',

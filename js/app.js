@@ -40,7 +40,7 @@
       h('a', { href: '#words', 'data-r': 'words', html: icon('words') + 'Từ vựng' }), h('a', { href: '#progress', 'data-r': 'progress', html: icon('chart') + 'Tiến độ' }));
     const hdr = h('header', { class: 'hdr' }, h('div', { class: 'wrap' },
       h('a', { class: 'brand', href: '#home', html: LOGO + '<div><span>Maths 7</span> <span class="long">Lab</span><small>Ôn tập Toán 7 · Stage 7</small></div>' }), nav,
-      h('div', { class: 'hdr-r' }, xp, trB, sB, thB)));
+      h('div', { class: 'hdr-r' }, xp, trB, APP.Music ? APP.Music.button() : null, sB, thB)));
     const bnav = h('nav', { class: 'bnav', 'aria-label': 'Điều hướng' },
       h('a', { href: '#home', 'data-r': 'home', html: icon('home') + 'Trang chủ' }), h('a', { href: '#exam', 'data-r': 'exam', html: icon('exam') + 'Tạo đề' }),
       h('a', { href: '#words', 'data-r': 'words', html: icon('words') + 'Từ vựng' }), h('a', { href: '#progress', 'data-r': 'progress', html: icon('chart') + 'Tiến độ' }));
@@ -52,7 +52,7 @@
   /* ---------- router ---------- */
   function route() {
     const hs = (location.hash || '#home').slice(1);
-    TR.close(); Speech.stop();
+    TR.close(); APP.stopAudio ? APP.stopAudio() : Speech.stop();
     let m;
     $$('[data-r]').forEach((a) => a.classList.toggle('on', a.dataset.r === hs || (hs.startsWith('u') && false)));
     if ((m = hs.match(/^u(\d+)(?:-(\w+))?$/)) && APP.unitMap[+m[1]]) { unitView(APP.unitMap[+m[1]], m[2] || 'learn'); }
@@ -280,8 +280,13 @@
       h('div', { class: 'eyebrow' }, 'Reading · Bài đọc'), h('h2', {}, r.title), r.sub ? h('div', { class: 'muted', style: { fontSize: '.92rem' } }, r.sub) : null,
       r.fig ? h('div', { class: 'qfig', html: r.fig }) : null,
       r.paras.map((p, i) => h('p', { html: (r.labels ? `<span class="pn">${r.labels[i] || String.fromCharCode(65 + i)}</span>` : '') + p })));
-    const listenB = h('button', { class: 'btn sm ghost no-tr', html: icon('speaker') + 'Nghe bài đọc', onclick: () => { if (Speech.state !== 'idle') { Speech.stop(); listenB.innerHTML = icon('speaker') + 'Nghe bài đọc'; return; } listenB.innerHTML = icon('stop') + 'Dừng'; Speech.speak(r.paras.map((p, i) => ({ text: APP.plain(p), id: 'p' + i })), { rate: 0.95 }).then(() => (listenB.innerHTML = icon('speaker') + 'Nghe bài đọc')); } });
-    passage.insertBefore(h('div', { class: 'row', style: { marginTop: '8px' } }, Speech.available() ? listenB : null, h('span', { class: 'muted', style: { fontSize: '.8rem' } }, 'Chạm vào từ để xem nghĩa · bôi đen cụm từ để dịch')), passage.children[3] || null);
+    const RA = (APP.AUDIO[u.n] || {}).read; const pEls = () => $$('p', passage);
+    const rctl = APP.makeAudio({ spec: RA, lines: r.paras.map((p) => ({ text: APP.plain(p), who: '_', g: 'f' })),
+      onLine: (i) => pEls().forEach((p, k) => p.classList.toggle('now', k === i)),
+      onState: (st) => { const on = st === 'playing' || st === 'loading'; listenB.innerHTML = icon(on ? 'pause' : 'speaker') + (on ? 'Tạm dừng' : st === 'paused' ? 'Nghe tiếp' : 'Nghe bài đọc'); listenB.classList.toggle('on', on); againB.hidden = st === 'idle'; } });
+    const listenB = h('button', { class: 'btn sm ghost no-tr', html: icon('speaker') + 'Nghe bài đọc', onclick: () => { SFX.init(); rctl.toggle(); } });
+    const againB = h('button', { class: 'btn sm ghost no-tr', hidden: true, html: icon('replay') + 'Từ đầu', onclick: () => rctl.replay() });
+    passage.insertBefore(h('div', { class: 'row', style: { marginTop: '8px' } }, (RA || Speech.available()) ? listenB : null, againB, h('span', { class: 'muted', style: { fontSize: '.8rem' } }, 'Chạm vào từ để xem nghĩa · bôi đen cụm từ để dịch')), passage.children[3] || null);
     const qcol = h('div', {});
     const sets = [];
     (r.parts || [{ title: 'Questions', qs: r.qs }]).forEach((part) => {
@@ -307,25 +312,53 @@
   // ---- listening tab ----
   function listenTab(u, body) {
     const L = u.listening; if (!L) { body.append(h('div', { class: 'empty' }, 'Đang cập nhật.')); return; }
-    let rate = store.get('rate', 1), playing = false;
+    const AU = (APP.AUDIO[u.n] || {}); const castG = AU.cast || {};
     const bars = h('div', { class: 'wave' }, Array.from({ length: 36 }, (_, i) => h('i', { style: { '--h': 25 + ((i * 37) % 70) + '%', animationDelay: (i % 9) * 0.08 + 's' } })));
     const info = h('div', { class: 'lineinfo' }, 'Nhấn ▶ để nghe. Bạn có thể nghe lại nhiều lần.');
     const playB = h('button', { class: 'play', 'aria-label': 'Phát', html: icon('play') });
-    const player = h('div', { class: 'player' }, h('div', { class: 'eyebrow', style: { color: 'var(--accent-2)' } }, 'Listening · Bài nghe'), h('h2', { style: { fontSize: '1.4rem' } }, L.title), h('div', { style: { opacity: '.8', fontSize: '.92rem' } }, L.intro || ''), bars,
-      h('div', { class: 'ctrls' }, playB, h('button', { class: 'btn sm ghost', style: { color: 'var(--surface)', borderColor: 'rgba(255,255,255,.25)' }, html: icon('replay') + 'Nghe lại từ đầu', onclick: () => { Speech.stop().then(() => start()); } }),
-        h('span', { class: 'spacer' }), h('span', { style: { fontSize: '.8rem', opacity: '.8' } }, 'Tốc độ'), VZ.seg([[0.8, '0.8×'], [1, '1×'], [1.2, '1.2×']], rate, (v) => { rate = v; store.set('rate', v); })), info);
-    const tr = h('div', { class: 'card transcript', 'data-tr': '', hidden: true }, h('div', { class: 'eyebrow' }, 'Transcript'), L.lines.map((l) => h('p', { html: (l.spk ? `<span class="spk">${l.spk}:</span>` : '') + l.text })));
+    const seek = h('input', { type: 'range', class: 'seek', min: 0, max: 100, step: 0.1, value: 0, 'aria-label': 'Vị trí phát' });
+    const tm = h('span', { class: 'tm mono' }, '0:00');
+    const fmt = (s) => { s = Math.max(0, s || 0); return Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0'); };
+    const tr = h('div', { class: 'card transcript', 'data-tr': '', hidden: true }, h('div', { class: 'eyebrow' }, 'Transcript · chạm số thứ tự để nghe lại câu đó'), L.lines.map((l, i) => h('p', { html: `<button class="ln no-tr" data-i="${i}" aria-label="Nghe lại câu ${i + 1}">${i + 1}</button>` + (l.spk ? `<span class="spk ${castG[l.spk] === 'm' ? 'm' : 'f'}">${l.spk}:</span> ` : '') + l.text })));
     const trB = h('button', { class: 'btn sm ghost', html: icon('eye') + 'Hiện transcript', onclick: () => { tr.hidden = !tr.hidden; trB.innerHTML = icon('eye') + (tr.hidden ? 'Hiện transcript' : 'Ẩn transcript'); } });
-    const setUI = (on) => { playing = on; player.classList.toggle('playing', on); playB.innerHTML = icon(on ? 'pause' : 'play'); };
-    const voices = L.voices || {};
-    function start() {
-      if (!Speech.available()) { toast('Thiết bị này không hỗ trợ đọc to. Hãy mở transcript.'); tr.hidden = false; return; }
-      setUI(true); info.textContent = 'Đang phát…';
-      Speech.speak(L.lines.map((l, i) => ({ text: (l.spk && L.sayNames ? l.spk + ': ' : '') + APP.plain(l.text), voice: voices[l.spk] || l.voice, id: 'l' + i })), { rate, onLine: (i) => { $$('p', tr).forEach((p, k) => p.classList.toggle('now', k === i)); info.textContent = `Đoạn ${i + 1}/${L.lines.length}`; } })
-        .then(() => { setUI(false); info.textContent = 'Đã nghe xong. Trả lời câu hỏi bên dưới.'; $$('p', tr).forEach((p) => p.classList.remove('now')); });
-    }
-    Speech.init().then((t) => { if (t) t.onLine && t.onLine(({ line }) => { $$('p', tr).forEach((p, k) => p.classList.toggle('now', k === line)); info.textContent = `Đoạn ${line + 1}/${L.lines.length}`; }); });
-    playB.onclick = () => { SFX.init(); if (!playing && Speech.state === 'paused') { Speech.resume(); setUI(true); return; } if (playing) { Speech.pause(); setUI(false); info.textContent = 'Tạm dừng'; return; } start(); };
+    const who = h('div', { class: 'who' }, Object.keys(L.voices || castG).map((n) => h('span', { class: 'spk-chip ' + (castG[n] === 'm' ? 'm' : 'f'), 'data-n': n, html: (castG[n] === 'm' ? '♂ ' : '♀ ') + n })));
+    let seeking = false, player = null, wraf = 0;
+    const lv = new Float32Array(bars.children.length), barEls = [...bars.children];
+    const wave = () => {
+      wraf = 0; if (!document.body.contains(bars)) return;
+      if (ctl.levels && ctl.levels(lv)) { bars.classList.add('live'); barEls.forEach((el, i) => { el.style.transform = `scaleY(${(0.08 + lv[i] * 0.92).toFixed(3)})`; }); }
+      if (ctl.state === 'playing') wraf = requestAnimationFrame(wave);
+      else { bars.classList.remove('live'); barEls.forEach((el) => { el.style.transform = ''; }); }
+    };
+    const ctl = APP.makeAudio({
+      spec: AU.listen, cast: castG,
+      lines: L.lines.map((l) => ({ text: APP.plain(l.text), who: l.spk || '_', g: castG[l.spk] || 'f' })),
+      onLine: (i) => {
+        $$('p', tr).forEach((p, k) => p.classList.toggle('now', k === i));
+        const sp = i >= 0 ? L.lines[i].spk : null; $$('.spk-chip', who).forEach((c) => c.classList.toggle('talk', c.dataset.n === sp));
+        if (i >= 0) info.textContent = `Đoạn ${i + 1}/${L.lines.length}` + (sp ? ` · ${sp} đang nói` : '');
+      },
+      onState: (st) => {
+        const on = st === 'playing' || st === 'loading';
+        if (player) player.classList.toggle('playing', st === 'playing');
+        if (st === 'playing' && !wraf) wraf = requestAnimationFrame(wave);
+        playB.innerHTML = icon(on ? 'pause' : 'play'); playB.setAttribute('aria-label', on ? 'Tạm dừng' : 'Phát');
+        if (st === 'loading') info.textContent = 'Đang tải âm thanh…';
+        if (st === 'playing') { const i = ctl ? ctl.line : -1, sp = i >= 0 ? L.lines[i].spk : null; info.textContent = i >= 0 ? `Đoạn ${i + 1}/${L.lines.length}` + (sp ? ` · ${sp} đang nói` : '') : 'Đang phát…'; }
+        if (st === 'paused') info.textContent = 'Tạm dừng — nhấn ▶ để nghe tiếp.';
+        if (st === 'ended') { info.textContent = 'Đã nghe xong. Trả lời câu hỏi bên dưới (có thể nghe lại).'; $$('.spk-chip', who).forEach((c) => c.classList.remove('talk')); }
+      },
+      onTime: (t, d) => { if (!seeking) { seek.max = d || 100; seek.value = t; } tm.textContent = fmt(t) + ' / ' + fmt(d); },
+    });
+    seek.addEventListener('input', () => { seeking = true; tm.textContent = fmt(+seek.value) + ' / ' + fmt(ctl.duration()); });
+    seek.addEventListener('change', () => { ctl.seek(+seek.value); seeking = false; });
+    if (ctl.mode !== 'file') { seek.hidden = true; tm.hidden = true; }
+    tr.addEventListener('click', (e) => { const b = e.target.closest('.ln'); if (b) { SFX.init(); ctl.seekLine(+b.dataset.i); } });
+    playB.onclick = () => { SFX.init(); ctl.toggle(); };
+    player = h('div', { class: 'player' }, h('div', { class: 'eyebrow', style: { color: 'var(--accent-2)' } }, 'Listening · Bài nghe'), h('h2', { style: { fontSize: '1.4rem' } }, L.title), h('div', { style: { opacity: '.8', fontSize: '.92rem' } }, L.intro || ''), who, bars,
+      h('div', { class: 'seekrow' }, seek, tm),
+      h('div', { class: 'ctrls' }, playB, h('button', { class: 'btn sm ghost', style: { color: 'var(--surface)', borderColor: 'rgba(255,255,255,.25)' }, html: icon('replay') + 'Nghe lại từ đầu', onclick: () => { SFX.init(); ctl.replay(); } }),
+        h('span', { class: 'spacer' }), h('span', { style: { fontSize: '.8rem', opacity: '.8' } }, 'Tốc độ'), VZ.seg([[0.8, '0.8×'], [1, '1×'], [1.2, '1.2×']], ctl.rate, (v) => ctl.setRate(v))), info);
     const qcol = h('div', {}); const sets = [];
     (L.parts || [{ title: 'Questions', qs: L.qs }]).forEach((part) => {
       const blk = h('div', { class: 'card qblock' }, h('h4', { 'data-tr': '', html: icon('head').replace('<svg', '<svg style="width:17px;height:17px;color:var(--sc)"') + part.title }));
@@ -427,7 +460,7 @@
       area.innerHTML = ''; const L = list();
       if (mode === 'list') {
         if (!L.length) return area.append(h('div', { class: 'empty' }, 'Không tìm thấy từ nào.'));
-        area.append(h('div', { class: 'words-grid' }, L.map((w) => h('div', { class: 'card wcard s-' + w.u.strand }, h('div', { style: { minWidth: 0 } }, h('b', { 'data-tr': '' }, w.en), h('span', {}, w.vi), h('div', { class: 'muted', style: { fontSize: '.72rem' } }, 'Chương ' + w.u.n)), Speech.available() ? h('button', { class: 'ibtn', 'aria-label': 'Phát âm ' + w.en, html: icon('speaker'), onclick: () => Speech.speak(w.en, { rate: 0.85 }) }) : null))));
+        area.append(h('div', { class: 'words-grid' }, L.map((w) => h('div', { class: 'card wcard s-' + w.u.strand }, h('div', { style: { minWidth: 0 } }, h('b', { 'data-tr': '' }, w.en), h('span', {}, w.vi), h('div', { class: 'muted', style: { fontSize: '.72rem' } }, 'Chương ' + w.u.n)), Speech.available() ? h('button', { class: 'ibtn', 'aria-label': 'Phát âm ' + w.en, html: icon('speaker'), onclick: () => APP.sayWord(w.en) }) : null))));
       } else if (mode === 'cards') {
         if (!L.length) return;
         let i = 0; const deck = U.shuffle(L);
@@ -437,7 +470,7 @@
         paint();
         area.append(h('div', { class: 'fc-stage' }, fc, cnt, h('div', { class: 'row', style: { justifyContent: 'center' } },
           h('button', { class: 'btn', html: icon('arrowL'), 'aria-label': 'Thẻ trước', onclick: () => { i = (i - 1 + deck.length) % deck.length; paint(); SFX.play('whoosh'); } }),
-          Speech.available() ? h('button', { class: 'btn', html: icon('speaker') + 'Nghe', onclick: () => Speech.speak(deck[i].en, { rate: 0.85 }) }) : null,
+          Speech.available() ? h('button', { class: 'btn', html: icon('speaker') + 'Nghe', onclick: () => APP.sayWord(deck[i].en) }) : null,
           h('button', { class: 'btn pri', html: 'Thẻ tiếp ' + icon('arrowR'), onclick: () => { i = (i + 1) % deck.length; paint(); SFX.play('whoosh'); } }))));
       }
     }
@@ -486,7 +519,7 @@
     header();
     main = h('main', { id: 'main' }); document.body.insertBefore(main, $('.bnav'));
     CHAT.init();
-    window.addEventListener('hashchange', route);
+    window.addEventListener('hashchange', (e) => (APP.transition ? APP.transition(route, e) : route()));
     route();
     Speech.init(); APP.AI.get();
     APP.on('progress', () => {});

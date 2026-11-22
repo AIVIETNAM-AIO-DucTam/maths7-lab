@@ -77,7 +77,7 @@
     const sentBox = h('div', { class: 'sent', hidden: true });
     pop = h('div', { class: 'trpop', role: 'dialog', 'aria-label': 'Dịch từ ' + word },
       h('button', { class: 'x', 'aria-label': 'Đóng', html: icon('close'), onclick: closePop }),
-      h('div', { class: 'w' }, word, Speech.available() ? h('button', { class: 'ibtn', style: { width: '32px', height: '32px' }, 'aria-label': 'Phát âm', html: icon('speaker'), onclick: () => Speech.speak(word, { rate: 0.85 }) }) : null),
+      h('div', { class: 'w' }, word, Speech.available() ? h('button', { class: 'ibtn', style: { width: '32px', height: '32px' }, 'aria-label': 'Phát âm', html: icon('speaker'), onclick: () => APP.sayWord(word) }) : null),
       hit && hit.w !== word.toLowerCase() ? h('div', { class: 'pos' }, 'từ gốc: ' + hit.w) : null,
       vi,
       ph && ph.v ? h('div', { class: 'ph', html: `Cụm từ: <b>${esc(ph.p)}</b> = ${esc(ph.v)}` }) : null,
